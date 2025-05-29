@@ -73,9 +73,9 @@ func (m *HelloDagger) Develop(
 
 	// Environment with agent inputs and outputs
 	environment := dag.Env(dagger.EnvOpts{Privileged: true}). // privileged lets the agent use the existing test function
-		WithStringInput("assignment", assignment, "the assignment to complete").
-		WithWorkspaceInput("workspace", dag.Workspace(source), "the workspace with tools to edit code").
-		WithWorkspaceOutput("completed", "the workspace with the completed assignment")
+									WithStringInput("assignment", assignment, "the assignment to complete").
+									WithWorkspaceInput("workspace", dag.Workspace(source), "the workspace with tools to edit code").
+									WithWorkspaceOutput("completed", "the workspace with the completed assignment")
 
 	// Detailed prompts stored in markdown files
 	promptFile := dag.CurrentModule().Source().File("prompts/develop.md")
@@ -101,4 +101,47 @@ func (m *HelloDagger) Develop(
 
 	// Return the Directory with the assignment completed
 	return completedDirectory, nil
+}
+
+// Develop with a GitHub issue as the assignment and open a pull request
+func (m *HelloDagger) DevelopIssue(
+	ctx context.Context,
+	// GitHub token with permissions to write issues and contents
+	githubToken *dagger.Secret,
+	// GitHub issue number
+	issueID int,
+	// GitHub repository URL
+	repository string,
+	// +defaultPath="/"
+	source *dagger.Directory,
+) (string, error) {
+	// Get the GitHub issue
+	issueClient := dag.GithubIssue(dagger.GithubIssueOpts{Token: githubToken})
+	issue := issueClient.Read(repository, issueID)
+
+	// Get information from the issue
+	assignment, err := issue.Body(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	// Solve the issue with the developer agent
+	feature, err := m.Develop(ctx, assignment, source)
+	if err != nil {
+		return "", err
+	}
+
+	// Open a pull request
+	title, err := issue.Title(ctx)
+	if err != nil {
+		return "", err
+	}
+	url, err := issue.URL(ctx)
+	if err != nil {
+		return "", err
+	}
+	body := assignment + "\n\nCloses " + url
+	pr := issueClient.CreatePullRequest(repository, title, body, feature)
+
+	return pr.URL(ctx)
 }
